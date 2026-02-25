@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.superadmin == true ||
+        request.auth.token.role == 'superadmin'
+      );
+    }
+
+    function isOwnerOfRestaurant(restaurantId) {
+      return isSignedIn() &&
+        firestore.get(/databases/(default)/documents/restaurants/$(restaurantId)).data.ownerUid == request.auth.uid;
+    }
+
+    // Public reads (menu images, logos)
+    match /{allPaths=**} {
+      allow read: if true;
+    }
+
+    // Restaurant-scoped uploads
+    match /restaurants/{restaurantId}/{allPaths=**} {
+      allow write: if isSuperAdmin() || isOwnerOfRestaurant(restaurantId);
+    }
+
+    // Optional: per-user uploads
+    match /uploads/{uid}/{allPaths=**} {
+      allow write: if isSignedIn() && request.auth.uid == uid;
+    }
+  }
+}

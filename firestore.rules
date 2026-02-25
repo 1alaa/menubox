@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.superadmin == true ||
+        request.auth.token.role == 'superadmin'
+      );
+    }
+
+    function isOwnerUid(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isVerifiedOwner() {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true;
+    }
+
+    function isOwnerOfRestaurant(restaurantId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/restaurants/$(restaurantId)).data.ownerUid == request.auth.uid;
+    }
+
+    // Users
+    match /users/{uid} {
+      allow read: if isOwnerUid(uid) || isSuperAdmin();
+      allow create: if isOwnerUid(uid);
+      allow update: if isOwnerUid(uid) || isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Email verification codes (6-digit)
+    match /email_verifications/{uid} {
+      allow read: if isOwnerUid(uid) || isSuperAdmin();
+      allow create: if isOwnerUid(uid);
+      allow update: if isOwnerUid(uid);
+      allow delete: if isSuperAdmin();
+    }
+
+    // Restaurants
+    match /restaurants/{restaurantId} {
+      // Public read so customers can view menus
+      allow read: if true;
+
+      // Owners can create only if ownerUid is themselves
+      allow create: if isSuperAdmin() || (isSignedIn() && isVerifiedOwner() && request.resource.data.ownerUid == request.auth.uid);
+
+      // Owners can edit their restaurant; superadmin can edit any
+      allow update, delete: if isSuperAdmin() || (isOwnerOfRestaurant(restaurantId) && isVerifiedOwner());
+
+      // Categories
+      match /categories/{categoryId} {
+        allow read: if true;
+        allow create, update, delete: if isSuperAdmin() || (isOwnerOfRestaurant(restaurantId) && isVerifiedOwner());
+      }
+
+      // Items
+      match /items/{itemId} {
+        allow read: if true;
+        allow create, update, delete: if isSuperAdmin() || (isOwnerOfRestaurant(restaurantId) && isVerifiedOwner());
+      }
+
+      // Branding
+      match /branding/{docId} {
+        allow read: if true;
+        allow create, update, delete: if isSuperAdmin() || (isOwnerOfRestaurant(restaurantId) && isVerifiedOwner());
+      }
+
+      // Anything else under restaurants
+      match /{subPath=**} {
+        allow read: if true;
+        allow write: if isSuperAdmin() || (isOwnerOfRestaurant(restaurantId) && isVerifiedOwner());
+      }
+    }
+  }
+}
