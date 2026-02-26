@@ -52,6 +52,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/admin/create"
             element={
@@ -60,6 +61,17 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* ✅ FIX: alias للمسار اللي الزر عم يروح عليه */}
+          <Route
+            path="/admin/restaurant"
+            element={
+              <ProtectedRoute allowedRoles={["owner"]}>
+                <CreateRestaurantPage />
+              </ProtectedRoute>
+            }
+          />
+
           <Route
             path="/admin/branding"
             element={
