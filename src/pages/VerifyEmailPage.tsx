@@ -1,19 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { db } from "../lib/firebase";
 import { VerificationCodeInput } from "../components/VerificationCodeInput";
 import { resendEmailVerification, verifyEmailCode } from "../services/verification";
 import { MailCheck, RefreshCw } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 
 const COOLDOWN_SEC = 60;
 
 const VerifyEmailPage: React.FC = () => {
   const nav = useNavigate();
-  const user = auth.currentUser;
+  const { user, userDoc, loading } = useAuth();
 
   const [email, setEmail] = useState<string>("");
-  const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>("");
@@ -31,29 +31,32 @@ const VerifyEmailPage: React.FC = () => {
     return () => t && clearInterval(t);
   }, [timeLeft]);
 
+  // ✅ إذا ما في user -> رجع للّوچين
+  useEffect(() => {
+    if (!loading && !user) {
+      nav("/admin/login", { replace: true });
+    }
+  }, [loading, user, nav]);
+
+  // ✅ إذا صار verified (من snapshot) -> روح admin
+  useEffect(() => {
+    if (!loading && user && userDoc?.isVerified === true) {
+      nav("/admin", { replace: true });
+    }
+  }, [loading, user, userDoc?.isVerified, nav]);
+
   useEffect(() => {
     const run = async () => {
-      setLoading(true);
       setError("");
       setSuccess("");
 
       try {
-        if (!user) {
-          nav("/admin/login");
-          return;
-        }
+        if (!user) return;
 
-        const uSnap = await getDoc(doc(db, "users", user.uid));
-        const u = uSnap.data() as any;
-        setEmail(user.email || u?.email || "");
+        // email display
+        setEmail(user.email || "");
 
-        // if already verified, go admin
-        if (u?.isVerified) {
-          nav("/admin");
-          return;
-        }
-
-        // pull lastSentAt to calculate cooldown
+        // cooldown
         const vSnap = await getDoc(doc(db, "email_verifications", user.uid));
         if (vSnap.exists()) {
           const v: any = vSnap.data();
@@ -62,17 +65,15 @@ const VerifyEmailPage: React.FC = () => {
           const left = Math.max(0, COOLDOWN_SEC - Math.floor(diff / 1000));
           setTimeLeft(left);
         } else {
-          // no record (edge case) – allow resend immediately
           setTimeLeft(0);
         }
       } catch (e: any) {
         setError(e?.message || "Failed to load verification state");
-      } finally {
-        setLoading(false);
       }
     };
-    run();
-  }, [nav, user]);
+
+    if (!loading) run();
+  }, [loading, user]);
 
   const canResend = useMemo(() => timeLeft === 0 && !sending, [timeLeft, sending]);
 
@@ -84,7 +85,8 @@ const VerifyEmailPage: React.FC = () => {
     try {
       await verifyEmailCode(uid, code);
       setSuccess("Verified! Redirecting…");
-      nav("/admin");
+      // ما في داعي نعمل reload — snapshot رح يحدّث userDoc فوراً
+      nav("/admin", { replace: true });
     } catch (e: any) {
       const msg = e?.message || "Verification failed";
       setError(
@@ -139,7 +141,8 @@ const VerifyEmailPage: React.FC = () => {
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Verify your email</h1>
           <p className="text-stone-500 mt-2 text-center">
-            We sent a 6-digit code to <span className="font-semibold text-stone-700">{email}</span>
+            We sent a 6-digit code to{" "}
+            <span className="font-semibold text-stone-700">{email}</span>
           </p>
         </div>
 

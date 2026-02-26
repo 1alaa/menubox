@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { getIdTokenResult, onAuthStateChanged, User } from "firebase/auth";
-import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { UserDoc } from "../types";
 
@@ -26,62 +26,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [role, setRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const userDocUnsubRef = useRef<null | (() => void)>(null);
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      // cleanup old listener
+      if (userDocUnsubRef.current) {
+        userDocUnsubRef.current();
+        userDocUnsubRef.current = null;
+      }
+
       setUser(firebaseUser);
       setUserDoc(null);
       setRole(null);
+      setLoading(true);
 
       if (!firebaseUser) {
         setLoading(false);
         return;
       }
 
+      // 1) اقرأ claims مرة (لـ superadmin)
       try {
-        // 1) Read custom claims (recommended for Super Admin)
-        // Example:
-        //   { superadmin: true }
-        //   { role: 'superadmin' }
-        try {
-          const token = await getIdTokenResult(firebaseUser, true);
-          const claims: any = token?.claims || {};
-          if (claims?.role === "superadmin" || claims?.superadmin === true) setRole("superadmin");
-          else if (claims?.role === "owner") setRole("owner");
-        } catch (e) {
-          console.warn("Could not read token claims", e);
-        }
-
-        // 2) Read users/{uid} doc (fallback role + restaurantId)
-        const docRef = doc(db, "users", firebaseUser.uid);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          const data = docSnap.data() as UserDoc;
-          // Backward compatibility: old accounts without isVerified are treated as verified
-          const normalized: UserDoc = { ...data, isVerified: data.isVerified ?? true };
-          setUserDoc(normalized);
-          setRole((prev) => prev || ((data.role as AppRole | undefined) ?? null));
-        } else {
-          // Create default user doc for new signups
-          const newUser: UserDoc = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || "",
-            role: "owner",
-            isVerified: false,
-            createdAt: Timestamp.now(),
-          };
-          await setDoc(docRef, newUser);
-          setUserDoc(newUser);
-          setRole((prev) => prev || "owner");
-        }
+        const token = await getIdTokenResult(firebaseUser, true);
+        const claims: any = token?.claims || {};
+        if (claims?.role === "superadmin" || claims?.superadmin === true) setRole("superadmin");
+        else if (claims?.role === "owner") setRole("owner");
       } catch (e) {
-        console.error("Failed to load user doc", e);
-      } finally {
-        setLoading(false);
+        console.warn("Could not read token claims", e);
       }
+
+      // 2) Subscribe على users/{uid} حتى isVerified تتحدث فوراً بعد verify
+      const uRef = doc(db, "users", firebaseUser.uid);
+
+      userDocUnsubRef.current = onSnapshot(
+        uRef,
+        async (snap) => {
+          try {
+            if (snap.exists()) {
+              const data = snap.data() as UserDoc;
+
+              // Backward compatibility
+              const normalized: UserDoc = { ...data, isVerified: data.isVerified ?? true };
+
+              setUserDoc(normalized);
+              setRole((prev) => prev || ((normalized.role as AppRole | undefined) ?? null));
+              setLoading(false);
+              return;
+            }
+
+            // إذا ما في doc (أول مرة): انشئه مرة وحدة
+            const newUser: UserDoc = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || "",
+              role: "owner",
+              isVerified: false,
+              createdAt: Timestamp.now(),
+            };
+
+            // تأكد ما نعمل setDoc بشكل متكرر:
+            const existsNow = await getDoc(uRef);
+            if (!existsNow.exists()) {
+              await setDoc(uRef, newUser);
+            }
+
+            // snapshot رح يشتغل لحاله بعد setDoc
+          } catch (e) {
+            console.error("Failed to sync user doc", e);
+            setLoading(false);
+          }
+        },
+        (err) => {
+          console.error("User doc listener error", err);
+          setLoading(false);
+        }
+      );
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribeAuth();
+      if (userDocUnsubRef.current) userDocUnsubRef.current();
+    };
   }, []);
 
   return (
