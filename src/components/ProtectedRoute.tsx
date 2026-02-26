@@ -42,11 +42,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
     return <Navigate to="/admin" replace />;
   }
 
-
-  // Owners must verify with 6-digit code before accessing protected pages
-  if (role === "owner" && userDoc && userDoc.isVerified !== true) {
+  // Owners must verify with 6-digit code before accessing protected pages (NEW accounts only)
+  // Old accounts may not have isVerified field; we treat them as verified.
+  if (role === "owner" && userDoc && userDoc.isVerified === false) {
     // allow access only to verify/forgot/login routes
-    if (!location.pathname.startsWith("/admin/verify") && !location.pathname.startsWith("/admin/forgot") && location.pathname !== "/admin/login") {
+    if (
+      !location.pathname.startsWith("/admin/verify") &&
+      !location.pathname.startsWith("/admin/forgot") &&
+      location.pathname !== "/admin/login"
+    ) {
       return <Navigate to="/admin/verify" replace />;
     }
   }

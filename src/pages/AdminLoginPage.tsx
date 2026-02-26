@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "../lib/firebase";
-import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import { doc, setDoc, Timestamp } from "firebase/firestore";
 import { startEmailVerification } from "../services/verification";
 import { QrCode, Mail, Lock, Loader2 } from "lucide-react";
 
@@ -21,20 +21,12 @@ const AdminLoginPage: React.FC = () => {
 
     try {
       if (isLogin) {
-        const cred = await signInWithEmailAndPassword(auth, email, password);
-
-        // Block access until code verification is done
-        const uSnap = await getDoc(doc(db, "users", cred.user.uid));
-        const u: any = uSnap.exists() ? uSnap.data() : null;
-
-        if (u && u.isVerified !== true && (u.role === "owner" || !u.role)) {
-          navigate("/admin/verify");
-          return;
-        }
+        await signInWithEmailAndPassword(auth, email, password);
+        // ✅ No verification checks on login anymore
       } else {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-        // Ensure a user doc exists with isVerified=false
+        // Ensure a user doc exists with isVerified=false (NEW ACCOUNTS ONLY)
         await setDoc(
           doc(db, "users", cred.user.uid),
           {
@@ -112,33 +104,23 @@ const AdminLoginPage: React.FC = () => {
             </div>
           </div>
 
-          {isLogin && (
-            <div className="text-right">
-              <button
-                type="button"
-                onClick={() => navigate("/admin/forgot")}
-                className="text-sm font-semibold text-emerald-700 hover:underline"
-              >
-                Forgot password?
-              </button>
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isLogin ? "Sign In" : "Create Account")}
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
+            {isLogin ? "Sign In" : "Create Account"}
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-stone-100 text-center">
+        <div className="mt-6 text-center">
           <button
+            type="button"
             onClick={() => setIsLogin(!isLogin)}
-            className="text-emerald-600 font-semibold hover:underline"
+            className="text-emerald-700 font-semibold hover:underline"
           >
-            {isLogin ? "Need an account? Sign up" : "Already have an account? Sign in"}
+            {isLogin ? "Create a new account" : "I already have an account"}
           </button>
         </div>
       </div>
